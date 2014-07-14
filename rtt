@@ -713,6 +713,11 @@ while true; do
 	fi
 done
 apt-get install curl ffmpeg mediainfo
+cd /tmp
+wget http://geolite.maxmind.com/download/geoip/database/GeoLiteCity.dat.gz mkdir -v /usr/share/GeoIP
+gunzip GeoLiteCity.dat.gz
+mv -v GeoLiteCity.dat /usr/share/GeoIP/GeoIPCity.dat
+apt-get install php5-geoip
 ###INIT SCRIPT###
 wget -O /etc/init.d/rtorrent-init https://raw.github.com/Kerwood/rtorrent.auto.install/master/Files/rtorrent-init
 
