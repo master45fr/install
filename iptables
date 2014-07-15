@@ -1,0 +1,89 @@
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          openvz-nat
+# Required-Start:    $network
+# Required-Stop:     $network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: OpenVZ-NAT
+# Description:       Active le NAT et le firewall
+### END INIT INFO
+
+# PROTECTION SPOOFING
+if [ -e /proc/sys/net/ipv4/conf/all/rp_filter ]
+then
+for filtre in /proc/sys/net/ipv4/conf/*/rp_filter
+do
+echo 1 > $filtre
+done
+fi
+
+
+# Vider les tables actuelles
+iptables -t filter -F
+
+# Vider les règles personnelles
+iptables -t filter -X
+
+### AJOUT CHAINE POUR MARQUAGE PAQUETS DANS LES LOGS
+### MARQUAGE DES PAQUETS BLOQUES
+iptables -N LOG_DROP
+iptables -A LOG_DROP -j LOG –log-prefix ‘[IPTABLES DROP] : ‘
+iptables -A LOG_DROP -j DROP
+
+### MARQUAGE DES PAQUETS AUTORISES
+iptables -N LOG_ACCEPT
+iptables -A LOG_ACCEPT -j LOG –log-prefix ‘[IPTABLES ACCEPT] : ‘
+iptables -A LOG_ACCEPT -j ACCEPT
+
+### PAR DEFAUT, ON BLOQUE TOUT
+iptables -P INPUT DROP
+iptables -P OUTPUT DROP
+iptables -P FORWARD DROP
+
+### Obligation d’autoriser les connexions locales
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+
+### On maintiens les connexions déjà actives
+iptables -A INPUT -m state –state RELATED,ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -m state –state RELATED,ESTABLISHED -j ACCEPT
+
+##Activation de l'ip-forwarding##
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+##Ouverture reseau Privé
+iptables -A FORWARD -s 192.168.66.0/24 -j ACCEPT
+
+##Acces WAN 192.168.66.xxx
+iptables -t nat -A POSTROUTING -s 192.168.66.0/24 -o vmbr0 -j MASQUERADE
+
+### REQUETES HTTPS POUR PROXMOX WEB ADMIN
+iptables -t filter -A INPUT -p tcp –dport 8006 -j ACCEPT
+
+
+### ICMP – On autorise le serveur de supervision (via ICMP d’ONLINE)
+iptables -t filter -A INPUT -s 88.190.254.18 -p icmp -j ACCEPT
+iptables -t filter -A OUTPUT -d 88.190.254.18 -p icmp -j ACCEPT
+
+##Redirection de port
+iptables -t nat -A PREROUTING -p tcp -d 192.168.1.99 --dport 7000 -i vmbr0 -j DNAT --to-destination 192.168.66.2:80
+iptables -t nat -A PREROUTING -p tcp -d 192.168.1.99 --dport 7010 -i vmbr0 -j DNAT --to-destination 192.168.66.3:80
+iptables -t nat -A PREROUTING -p tcp -d 192.168.1.99 --dport 7011 -i vmbr0 -j DNAT --to-destination 192.168.66.3:21
+iptables -t nat -A PREROUTING -p tcp -d 192.168.1.99 --dport 8000 -i vmbr0 -j DNAT --to-destination 192.168.66.100:80
+
+iptables -A FORWARD -j LOG_DROP
+iptables -A INPUT -j LOG_DROP
+iptables -A OUTPUT -j LOG_DROP
+
+####################################################################################################################
+# iptables -t nat -A POSTROUTING -s 192.168.1.0/24 -o vmbr0 -s -j SNAT -to 192.168.1.99                            #
+#                                   RESEAUX PRIVE                         SORTIE (hôte)                            #
+#------------------------------------------------------------------------------------------------------------------#
+# iptables -t nat -A PREROUTING -p tcp -d 192.168.1.99 -dport 7000 -i vmbr0 -j DNAT -to-destination 192.168.1.2:80 #
+#                                         ENTRER (hôte)   :   PORT                                      VM / CT    #
+#------------------------------------------------------------------------------------------------------------------#
+# iptables -A FORWARD -s 192.168.1.0/24 -j ACCEPT                                                                  #
+#                                                                                                                  #
+####################################################################################################################
